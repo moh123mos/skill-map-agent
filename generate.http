@@ -1,0 +1,9 @@
+POST https://skill-map-agent-chi.vercel.app/generate
+Content-Type: application/json
+
+{
+    "track": "Backend Development",
+    "level": "beginner",
+    "hours": 3,
+    "goal": "Get a job as a backend developer"
+}

@@ -90,6 +90,9 @@ class UserInput(BaseModel):
     hours: int
     goal: str
 
+@app.get("/")
+def read_root():
+    return {"message": "Look Ma, I'm deployed!"}
 
 @app.post("/generate", response_model=StudyPlanOutput)
 def generate(user_input: UserInput):
