@@ -2,15 +2,13 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from typing import List
 import os
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.tools import tool
-from langchain_core.output_parsers import JsonOutputParser
 
 
 # ==============================
@@ -28,49 +26,8 @@ class StudyPlanOutput(BaseModel):
     tips: List[str] = Field(description="Practical study tips")
 
 
-parser = JsonOutputParser(pydantic_object=StudyPlanOutput)
-
-
-def get_agent_executor():
-    """Lazy initialization to avoid module-level crashes on Vercel."""
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
-        temperature=0.3
-    )
-
-    @tool
-    def generate_study_plan(track: str, level: str, hours: int, goal: str):
-        """
-        Generate structured study plan for a tech track.
-        """
-        prompt = f"""
-    Create a structured learning plan.
-
-    Track: {track}
-    Level: {level}
-    Study hours per day: {hours}
-    Goal: {goal}
-
-    Return response in JSON format with:
-    plan: string
-    resources: list of strings
-    tips: list of strings
-    """
-        response = llm.invoke(prompt)
-        return response.content
-
-    agent_prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are a professional tech career mentor."),
-        ("human", "{input}"),
-        ("placeholder", "{agent_scratchpad}")
-    ])
-
-    agent = create_tool_calling_agent(llm, [generate_study_plan], agent_prompt)
-    return AgentExecutor(agent=agent, tools=[generate_study_plan], verbose=True)
-
-
 # ==============================
-# 6️⃣ FastAPI
+# 3️⃣ FastAPI
 # ==============================
 app = FastAPI(title="Tech Career Agent")
 
@@ -81,28 +38,54 @@ class UserInput(BaseModel):
     hours: int
     goal: str
 
+
 @app.get("/")
 def read_root():
     return {"message": "Look Ma, I'm deployed!"}
 
+
 @app.post("/generate", response_model=StudyPlanOutput)
 def generate(user_input: UserInput):
 
-    user_prompt = f"""
-    Generate study plan for:
-    Track: {user_input.track}
-    Level: {user_input.level}
-    Hours per day: {user_input.hours}
-    Goal: {user_input.goal}
-    """
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-1.5-flash",
+        temperature=0.3,
+    )
 
-    agent_executor = get_agent_executor()
-    result = agent_executor.invoke({"input": user_prompt})
+    prompt = ChatPromptTemplate.from_messages([
+        ("system",
+         "You are a professional tech career mentor. "
+         "Always respond with valid JSON only, no markdown, no extra text. "
+         "The JSON must have exactly these keys: plan (string), resources (list of strings), tips (list of strings)."),
+        ("human",
+         "Generate a detailed study plan for:\n"
+         "Track: {track}\n"
+         "Level: {level}\n"
+         "Hours per day: {hours}\n"
+         "Goal: {goal}\n\n"
+         "Respond ONLY with valid JSON.")
+    ])
 
-    # Parse structured JSON
-    parsed = parser.parse(result["output"])
+    chain = prompt | llm
+    result = chain.invoke({
+        "track": user_input.track,
+        "level": user_input.level,
+        "hours": user_input.hours,
+        "goal": user_input.goal,
+    })
 
-    return parsed
+    # Clean and parse the response
+    text = result.content.strip()
+    # Remove markdown code fences if present
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    text = text.strip()
+
+    parsed = json.loads(text)
+    return StudyPlanOutput(**parsed)
+
 
 # This is important for Vercel
 if __name__ == "__main__":
