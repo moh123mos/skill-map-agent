@@ -53,7 +53,7 @@ def generate(user_input: UserInput):
             return JSONResponse(status_code=500, content={"error": "GOOGLE_API_KEY not set"})
 
         llm = ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
+            model="gemini-2.0-flash",
             temperature=0.3,
             google_api_key=GOOGLE_API_KEY,
         )
