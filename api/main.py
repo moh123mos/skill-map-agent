@@ -2,32 +2,25 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from typing import List
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.agents import create_tool_calling_agent, AgentExecutor
-from langchain.prompts import ChatPromptTemplate
-from langchain.tools import tool
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.tools import tool
 from langchain_core.output_parsers import JsonOutputParser
 
 
 # ==============================
 # 1️⃣ Set Gemini API Key
 # ==============================
-# حطي مفتاحك هنا أو في environment variable
-os.environ["GOOGLE_API_KEY"] = "AIzaSyBiw5o4Zv5t40PS8oB7naNeDqt3UD157nQ"
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 
 # ==============================
-# 2️⃣ Define LLM (Gemini)
-# ==============================
-llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash",
-    temperature=0.3
-)
-
-
-# ==============================
-# 3️⃣ Structured Output Schema
+# 2️⃣ Structured Output Schema
 # ==============================
 class StudyPlanOutput(BaseModel):
     plan: str = Field(description="Detailed step by step study plan")
@@ -38,16 +31,19 @@ class StudyPlanOutput(BaseModel):
 parser = JsonOutputParser(pydantic_object=StudyPlanOutput)
 
 
-# ==============================
-# 4️⃣ Tool
-# ==============================
-@tool
-def generate_study_plan(track: str, level: str, hours: int, goal: str):
-    """
-    Generate structured study plan for a tech track.
-    """
+def get_agent_executor():
+    """Lazy initialization to avoid module-level crashes on Vercel."""
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-1.5-flash",
+        temperature=0.3
+    )
 
-    prompt = f"""
+    @tool
+    def generate_study_plan(track: str, level: str, hours: int, goal: str):
+        """
+        Generate structured study plan for a tech track.
+        """
+        prompt = f"""
     Create a structured learning plan.
 
     Track: {track}
@@ -60,22 +56,17 @@ def generate_study_plan(track: str, level: str, hours: int, goal: str):
     resources: list of strings
     tips: list of strings
     """
+        response = llm.invoke(prompt)
+        return response.content
 
-    response = llm.invoke(prompt)
-    return response.content
+    agent_prompt = ChatPromptTemplate.from_messages([
+        ("system", "You are a professional tech career mentor."),
+        ("human", "{input}"),
+        ("placeholder", "{agent_scratchpad}")
+    ])
 
-
-# ==============================
-# 5️⃣ Create Agent
-# ==============================
-prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are a professional tech career mentor."),
-    ("human", "{input}"),
-    ("placeholder", "{agent_scratchpad}")
-])
-
-agent = create_tool_calling_agent(llm, [generate_study_plan], prompt)
-agent_executor = AgentExecutor(agent=agent, tools=[generate_study_plan], verbose=True)
+    agent = create_tool_calling_agent(llm, [generate_study_plan], agent_prompt)
+    return AgentExecutor(agent=agent, tools=[generate_study_plan], verbose=True)
 
 
 # ==============================
@@ -105,6 +96,7 @@ def generate(user_input: UserInput):
     Goal: {user_input.goal}
     """
 
+    agent_executor = get_agent_executor()
     result = agent_executor.invoke({"input": user_prompt})
 
     # Parse structured JSON
